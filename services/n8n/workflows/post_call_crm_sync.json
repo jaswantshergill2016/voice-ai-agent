@@ -1,0 +1,216 @@
+{
+  "name": "Post-Call CRM Sync (Vapi end-of-call-report)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-post-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000001",
+      "name": "Vapi Server Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "vapi-post-call"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"received\": true } }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000002",
+      "name": "Ack Vapi",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Vapi Server Webhook').item.json.body.message.type }}",
+              "rightValue": "end-of-call-report",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000003",
+      "name": "Is End Of Call Report?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "f1", "name": "call_id", "value": "={{ $('Vapi Server Webhook').item.json.body.message.call.id }}", "type": "string" },
+            { "id": "f2", "name": "phone_number", "value": "={{ $('Vapi Server Webhook').item.json.body.message.call.customer?.number ?? null }}", "type": "string" },
+            { "id": "f3", "name": "ended_reason", "value": "={{ $('Vapi Server Webhook').item.json.body.message.endedReason }}", "type": "string" },
+            { "id": "f4", "name": "duration_seconds", "value": "={{ $('Vapi Server Webhook').item.json.body.message.durationSeconds ?? 0 }}", "type": "number" },
+            { "id": "f5", "name": "summary", "value": "={{ $('Vapi Server Webhook').item.json.body.message.analysis?.summary ?? $('Vapi Server Webhook').item.json.body.message.summary ?? '' }}", "type": "string" },
+            { "id": "f6", "name": "transcript", "value": "={{ $('Vapi Server Webhook').item.json.body.message.artifact?.transcript ?? $('Vapi Server Webhook').item.json.body.message.transcript ?? '' }}", "type": "string" },
+            { "id": "f7", "name": "recording_url", "value": "={{ $('Vapi Server Webhook').item.json.body.message.artifact?.recordingUrl ?? $('Vapi Server Webhook').item.json.body.message.recordingUrl ?? null }}", "type": "string" },
+            { "id": "f8", "name": "cost_usd", "value": "={{ $('Vapi Server Webhook').item.json.body.message.cost ?? 0 }}", "type": "number" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000004",
+      "name": "Extract Call Metadata",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO call_summaries (call_id, phone_number, ended_reason, duration_seconds, summary, transcript, recording_url, cost_usd)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8)\nON CONFLICT (call_id) DO UPDATE SET\n  ended_reason = EXCLUDED.ended_reason,\n  duration_seconds = EXCLUDED.duration_seconds,\n  summary = EXCLUDED.summary,\n  transcript = EXCLUDED.transcript,\n  recording_url = EXCLUDED.recording_url,\n  cost_usd = EXCLUDED.cost_usd\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.call_id, $json.phone_number, $json.ended_reason, $json.duration_seconds, $json.summary, $json.transcript, $json.recording_url, $json.cost_usd] }}"
+        }
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000005",
+      "name": "Postgres: Upsert Call Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 200],
+      "credentials": {
+        "postgres": { "id": "voiceai-postgres", "name": "VoiceAI Postgres" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL ?? 'https://api.hubapi.com' }}/crm/v3/objects/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"properties\": {\n    \"phone\": $('Extract Call Metadata').item.json.phone_number,\n    \"lifecyclestage\": \"lead\",\n    \"hs_lead_status\": \"IN_PROGRESS\",\n    \"last_call_summary\": $('Extract Call Metadata').item.json.summary,\n    \"last_call_id\": $('Extract Call Metadata').item.json.call_id,\n    \"last_call_recording_url\": $('Extract Call Metadata').item.json.recording_url\n  }\n} }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000006",
+      "name": "CRM: Upsert Contact (HubSpot contract)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 200],
+      "credentials": {
+        "httpHeaderAuth": { "id": "voiceai-crm", "name": "CRM Bearer Token" }
+      },
+      "continueOnFail": true,
+      "notes": "Salesforce equivalent: PATCH {instance}/services/data/v60.0/sobjects/Contact/Phone/{phone} with {\"Description\": summary}."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $('Extract Call Metadata').item.json.phone_number }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000007",
+      "name": "Has Phone Number?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1440, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "s1", "name": "to", "value": "={{ $('Extract Call Metadata').item.json.phone_number }}", "type": "string" },
+            { "id": "s2", "name": "from", "value": "={{ $env.TWILIO_FROM_NUMBER ?? '+15005550006' }}", "type": "string" },
+            { "id": "s3", "name": "body", "value": "=Thanks for calling! Summary: {{ $('Extract Call Metadata').item.json.summary.slice(0, 120) }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000008",
+      "name": "Compose SMS",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWILIO_MOCK_URL ?? 'http://langgraph-fastpath:8000/mock/twilio/Messages.json' }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "To", "value": "={{ $json.to }}" },
+            { "name": "From", "value": "={{ $json.from }}" },
+            { "name": "Body", "value": "={{ $json.body }}" }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "b2c3d4e5-0002-4000-8000-000000000009",
+      "name": "Twilio SMS (simulated)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 100],
+      "continueOnFail": true,
+      "notes": "Production: swap for n8n-nodes-base.twilio (operation: send, resource: sms) with a Twilio credential, or POST to https://api.twilio.com/2010-04-01/Accounts/{AccountSid}/Messages.json with basic auth."
+    },
+    {
+      "parameters": {},
+      "id": "b2c3d4e5-0002-4000-8000-000000000010",
+      "name": "Ignore Other Events",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [720, 420]
+    },
+    {
+      "parameters": {},
+      "id": "b2c3d4e5-0002-4000-8000-000000000011",
+      "name": "Skip SMS",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1680, 320]
+    }
+  ],
+  "connections": {
+    "Vapi Server Webhook": { "main": [[{ "node": "Ack Vapi", "type": "main", "index": 0 }]] },
+    "Ack Vapi": { "main": [[{ "node": "Is End Of Call Report?", "type": "main", "index": 0 }]] },
+    "Is End Of Call Report?": {
+      "main": [
+        [{ "node": "Extract Call Metadata", "type": "main", "index": 0 }],
+        [{ "node": "Ignore Other Events", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Call Metadata": { "main": [[{ "node": "Postgres: Upsert Call Summary", "type": "main", "index": 0 }]] },
+    "Postgres: Upsert Call Summary": { "main": [[{ "node": "CRM: Upsert Contact (HubSpot contract)", "type": "main", "index": 0 }]] },
+    "CRM: Upsert Contact (HubSpot contract)": { "main": [[{ "node": "Has Phone Number?", "type": "main", "index": 0 }]] },
+    "Has Phone Number?": {
+      "main": [
+        [{ "node": "Compose SMS", "type": "main", "index": 0 }],
+        [{ "node": "Skip SMS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Compose SMS": { "main": [[{ "node": "Twilio SMS (simulated)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveExecutionProgress": true },
+  "active": true,
+  "pinData": {},
+  "tags": [{ "name": "voice-ai" }, { "name": "slow-path" }]
+}

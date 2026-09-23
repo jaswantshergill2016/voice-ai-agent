@@ -1,0 +1,9 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+httpx==0.28.1
+pydantic==2.11.4
+langgraph==0.4.5
+langchain-core==0.3.60
+langchain-groq==0.3.2
+langchain-openai==0.3.17
+python-multipart==0.0.20

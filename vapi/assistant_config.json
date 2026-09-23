@@ -1,0 +1,62 @@
+{
+  "name": "Ultra Low Latency Voice Agent",
+  "firstMessageMode": "assistant-speaks-first",
+  "firstMessage": "Hi, thanks for calling. How can I help you today?",
+  "transcriber": {
+    "provider": "deepgram",
+    "model": "nova-3",
+    "language": "en",
+    "smartFormat": false,
+    "endpointing": 150,
+    "eotTimeoutMs": 500,
+    "keywords": []
+  },
+  "model": {
+    "provider": "custom-llm",
+    "url": "https://YOUR_PUBLIC_HOST/v1",
+    "model": "voice-agent",
+    "temperature": 0.4,
+    "maxTokens": 256,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a concise, friendly voice assistant. Reply in 1-2 short sentences. Never use markdown, lists, or emojis; your output is spoken aloud."
+      }
+    ],
+    "metadataSendMode": "variable"
+  },
+  "voice": {
+    "provider": "cartesia",
+    "model": "sonic-english",
+    "voiceId": "a0e99841-438c-4a64-b679-ae501e7d6091",
+    "chunkPlan": {
+      "enabled": true,
+      "minCharacters": 20,
+      "punctuationBoundaries": [".", "!", "?", ";", ","]
+    }
+  },
+  "startSpeakingPlan": {
+    "waitSeconds": 0.2,
+    "smartEndpointingEnabled": false,
+    "transcriptionEndpointingPlan": {
+      "onPunctuationSeconds": 0.1,
+      "onNoPunctuationSeconds": 0.5,
+      "onNumberSeconds": 0.3
+    }
+  },
+  "stopSpeakingPlan": {
+    "numWords": 2,
+    "voiceSeconds": 0.2,
+    "backoffSeconds": 0.8
+  },
+  "backgroundDenoisingEnabled": true,
+  "silenceTimeoutSeconds": 30,
+  "maxDurationSeconds": 1800,
+  "clientMessages": ["transcript", "speech-update", "status-update"],
+  "serverMessages": ["end-of-call-report", "status-update", "tool-calls"],
+  "serverUrl": "https://YOUR_PUBLIC_N8N_HOST/webhook/vapi-post-call",
+  "metadata": {
+    "environment": "production",
+    "fastPath": "langgraph"
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "name": "Async Action Trigger (mid-call fast-path events)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "call-event",
+        "responseMode": "responseNode",
+        "options": { "rawBody": false }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Fast Path Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "call-event"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"accepted\": true, \"call_id\": $json.body.call_id, \"event_type\": $json.body.event_type } }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Respond 202 Immediately",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "f1", "name": "event_type", "value": "={{ $('Fast Path Webhook').item.json.body.event_type }}", "type": "string" },
+            { "id": "f2", "name": "call_id", "value": "={{ $('Fast Path Webhook').item.json.body.call_id }}", "type": "string" },
+            { "id": "f3", "name": "phone_number", "value": "={{ $('Fast Path Webhook').item.json.body.phone_number ?? null }}", "type": "string" },
+            { "id": "f4", "name": "user_text", "value": "={{ $('Fast Path Webhook').item.json.body.user_text }}", "type": "string" },
+            { "id": "f5", "name": "assistant_text", "value": "={{ $('Fast Path Webhook').item.json.body.assistant_text }}", "type": "string" },
+            { "id": "f6", "name": "ttft_ms", "value": "={{ $('Fast Path Webhook').item.json.body.latency_ms?.ttft ?? null }}", "type": "number" },
+            { "id": "f7", "name": "total_ms", "value": "={{ $('Fast Path Webhook').item.json.body.latency_ms?.total ?? null }}", "type": "number" },
+            { "id": "f8", "name": "metadata", "value": "={{ JSON.stringify($('Fast Path Webhook').item.json.body.metadata ?? {}) }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "name": "Normalize Event",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO call_events (call_id, event_type, phone_number, user_text, assistant_text, ttft_ms, total_ms, metadata)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.call_id, $json.event_type, $json.phone_number, $json.user_text, $json.assistant_text, $json.ttft_ms, $json.total_ms, $json.metadata] }}"
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "name": "Postgres: Log Turn",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 300],
+      "credentials": {
+        "postgres": { "id": "voiceai-postgres", "name": "VoiceAI Postgres" }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Normalize Event').item.json.event_type }}",
+              "rightValue": "tool.requested",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "name": "Is Tool Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_BASE_URL ?? 'https://api.hubapi.com' }}/crm/v3/objects/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"properties\": {\n    \"hs_timestamp\": $now.toISO(),\n    \"hs_note_body\": `Mid-call action for ${$('Normalize Event').item.json.call_id}: ${$('Normalize Event').item.json.user_text}`\n  }\n} }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000006",
+      "name": "CRM: Create Note (HubSpot contract)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 180],
+      "credentials": {
+        "httpHeaderAuth": { "id": "voiceai-crm", "name": "CRM Bearer Token" }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-4000-8000-000000000007",
+      "name": "No-op (turn logged)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1200, 420]
+    }
+  ],
+  "connections": {
+    "Fast Path Webhook": { "main": [[{ "node": "Respond 202 Immediately", "type": "main", "index": 0 }]] },
+    "Respond 202 Immediately": { "main": [[{ "node": "Normalize Event", "type": "main", "index": 0 }]] },
+    "Normalize Event": { "main": [[{ "node": "Postgres: Log Turn", "type": "main", "index": 0 }]] },
+    "Postgres: Log Turn": { "main": [[{ "node": "Is Tool Request?", "type": "main", "index": 0 }]] },
+    "Is Tool Request?": {
+      "main": [
+        [{ "node": "CRM: Create Note (HubSpot contract)", "type": "main", "index": 0 }],
+        [{ "node": "No-op (turn logged)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1", "saveExecutionProgress": true },
+  "active": true,
+  "pinData": {},
+  "tags": [{ "name": "voice-ai" }, { "name": "slow-path" }]
+}
