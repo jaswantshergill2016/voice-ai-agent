@@ -1,0 +1,38 @@
+server:
+  port: 8080
+  netty:
+    connection-timeout: 5s
+
+spring:
+  application:
+    name: spring-ai-fastpath
+  ai:
+    openai:
+      # Groq speaks the OpenAI protocol. Set LLM_BASE_URL=https://api.openai.com and
+      # LLM_MODEL=gpt-4o-mini to switch providers without code changes.
+      base-url: ${LLM_BASE_URL:https://api.groq.com/openai}
+      api-key: ${LLM_API_KEY:${GROQ_API_KEY:}}
+      chat:
+        options:
+          model: ${LLM_MODEL:llama-3.3-70b-versatile}
+          temperature: 0.4
+          max-tokens: 256
+          stream-usage: false
+
+voiceagent:
+  system-prompt: >-
+    You are a concise, friendly voice assistant. Reply in 1-2 short sentences.
+    Never use markdown, lists, or emojis; your output is spoken aloud.
+  n8n:
+    webhook-url: ${N8N_WEBHOOK_URL:http://n8n:5678/webhook/call-event}
+    timeout-ms: 5000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    com.voiceai: INFO

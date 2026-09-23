@@ -1,0 +1,112 @@
+name: voice-ai-agent
+
+x-fastpath-env: &fastpath-env
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/call-event}
+
+services:
+  langgraph-fastpath:
+    build: ./services/langgraph-fastpath
+    container_name: langgraph-fastpath
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *fastpath-env
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  spring-ai-fastpath:
+    build: ./services/spring-ai-fastpath
+    container_name: spring-ai-fastpath
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *fastpath-env
+      # Groq by default. For OpenAI: LLM_BASE_URL=https://api.openai.com LLM_API_KEY=$OPENAI_API_KEY LLM_MODEL=gpt-4o-mini
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai}
+      LLM_API_KEY: ${LLM_API_KEY:-${GROQ_API_KEY:-}}
+      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: voiceai
+      POSTGRES_USER: voiceai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voiceai}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./services/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voiceai -d voiceai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:1.94.1
+    container_name: n8n
+    # Import credentials + workflows and mark them active BEFORE the server boots so
+    # production webhooks are registered on first start (activation via CLI is not
+    # picked up by an already-running instance).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        n8n import:credentials --input=/import/credentials/postgres.json &&
+        n8n import:workflow --separate --input=/import/workflows &&
+        n8n update:workflow --all --active=true &&
+        exec n8n start
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_PORT: 5678
+      N8N_HOST: ${N8N_HOST:-localhost}
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-me-please}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: voiceai
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-voiceai}
+      # Exposed to workflows via $env.*
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      CRM_BASE_URL: ${CRM_BASE_URL:-http://langgraph-fastpath:8000/mock/crm}
+      TWILIO_MOCK_URL: ${TWILIO_MOCK_URL:-http://langgraph-fastpath:8000/mock/twilio/Messages.json}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-+15005550006}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./services/n8n/workflows:/import/workflows:ro
+      - ./services/n8n/credentials:/import/credentials:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  n8n-data:
