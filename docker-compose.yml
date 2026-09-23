@@ -63,6 +63,16 @@ services:
   n8n:
     image: n8nio/n8n:1.94.1
     container_name: n8n
+    # Import credentials + workflows and mark them active BEFORE the server boots so
+    # production webhooks are registered on first start (activation via CLI is not
+    # picked up by an already-running instance).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        n8n import:credentials --input=/import/credentials/postgres.json &&
+        n8n import:workflow --separate --input=/import/workflows &&
+        n8n update:workflow --all --active=true &&
+        exec n8n start
     ports:
       - "5678:5678"
     environment:
@@ -91,38 +101,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
     restart: unless-stopped
-
-  # One-shot: import workflows + credentials, then exit. Re-run with `docker compose run --rm n8n-import`.
-  n8n-import:
-    image: n8nio/n8n:1.94.1
-    container_name: n8n-import
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        n8n import:credentials --input=/import/credentials/postgres.json &&
-        n8n import:workflow --separate --input=/import/workflows &&
-        n8n update:workflow --all --active=true
-    environment:
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-me-please}
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: n8n
-      DB_POSTGRESDB_USER: voiceai
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-voiceai}
-    volumes:
-      - n8n-data:/home/node/.n8n
-      - ./services/n8n/workflows:/import/workflows:ro
-      - ./services/n8n/credentials:/import/credentials:ro
-    depends_on:
-      n8n:
-        condition: service_healthy
-    restart: "no"
 
 volumes:
   postgres-data:

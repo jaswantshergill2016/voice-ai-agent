@@ -22,7 +22,7 @@ asynchronously through n8n so they never touch the token stream.
 
 ```
 .
-├── docker-compose.yml           # langgraph-fastpath, spring-ai-fastpath, n8n, postgres (+ n8n-import)
+├── docker-compose.yml           # langgraph-fastpath, spring-ai-fastpath, n8n, postgres
 ├── .env.example
 ├── services/
 │   ├── langgraph-fastpath/      # Python 3.12 · FastAPI · LangGraph (stateful per call) · Groq/OpenAI
@@ -52,7 +52,7 @@ asynchronously through n8n so they never touch the token stream.
 ```bash
 cp .env.example .env            # add GROQ_API_KEY (or OPENAI_API_KEY)
 docker compose up -d --build
-docker compose logs -f n8n-import   # imports + activates both workflows once
+docker compose logs -f n8n          # imports + activates both workflows before the server starts
 ```
 
 | Service | URL |

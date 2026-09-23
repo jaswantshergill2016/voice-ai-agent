@@ -132,6 +132,5 @@
   },
   "settings": { "executionOrder": "v1", "saveExecutionProgress": true },
   "active": true,
-  "pinData": {},
-  "tags": [{ "name": "voice-ai" }, { "name": "slow-path" }]
+  "pinData": {}
 }
